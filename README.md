@@ -15,7 +15,7 @@ The source code contains the following core components:
    that periodically queries information for each thread by means of pluggable functions
    called *probes* (`probe_fn_t`).
    
-The program runs 4 worker threads, each one of which computes a montecarlo method approximation
+The program runs 4 worker threads, each of which computes a montecarlo method approximation
 of pi with different intervals. Empirically, the bigger the interval, the more cpu time the worker
 thread consumes.
 
