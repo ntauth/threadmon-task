@@ -14,6 +14,10 @@ The source code contains the following core components:
    the resource usage of a thread pool. Each `thread_pool_monitor` spawns a watchdog thread
    that periodically queries information for each thread by means of pluggable functions
    called *probes* (`probe_fn_t`).
+   
+The program runs 4 worker threads, each one of which computes a montecarlo method approximation
+of pi with different intervals. Empirically, the bigger the interval, the more cpu time the worker
+thread consumes.
 
 # Build
 ```bash
@@ -22,6 +26,6 @@ mkdir build
 cd build
 cmake ..
 make
-# Run
+# Run (press any key to stop the threads)
 ./threadmon_task
 ````

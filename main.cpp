@@ -8,17 +8,16 @@
 #include <atomic>
 #include <thread>
 #include <functional>
-#include <chrono>
-#include <ctime>
 #include <mutex>
 #include <vector>
 #include <iostream>
 #include <unordered_map>
+#include <cmath>
 
 using namespace std::literals::chrono_literals;
 
 /**
- * @class Pthread Utilities
+ * @brief pthread utilities
  *
  */
 class pthread_utils
@@ -28,7 +27,7 @@ class pthread_utils
          *
          * @param handle thread native handle
          * @param[out] ts thread cpu time
-         * @return a boolean indicating success
+         * @return true if successful
          */
         static bool get_current_cpu_timespec(std::thread::native_handle_type handle, timespec& ts)
         {
@@ -45,7 +44,7 @@ class pthread_utils
 };
 
 /**
- * @class A thread class that wraps std::thread and extends its functionalities
+ * @brief feature-augmenting wrapper for std::thread
  *
  */
 class thread_ex
@@ -63,7 +62,6 @@ class thread_ex
         typename std::enable_if<std::is_same<typename std::decay<_CbFn>::type, no_callback_t>::value>::type
             invoke_callback(_CbFn&& cb_fn)
         {
-
         }
 
         template<typename _CbFn>
@@ -104,7 +102,6 @@ class thread_ex
                 : _wall_time_start(other._wall_time_start)
                 , _thread(std::move(other._thread))
         {
-
         }
 
         template<typename _Fn, typename _CbFn, typename ..._Args>
@@ -130,30 +127,18 @@ class thread_ex
             _wall_time_start = other._wall_time_start;
         }
 
-        void detach() {
-            _thread.detach();
-        }
-
-        void join() {
-            _thread.join();
-        }
-
-        bool joinable() {
-            return _thread.joinable();
-        }
-
-        std::thread::id get_id() {
-            return _thread.get_id();
-        }
-
-        auto native_handle() {
-            return _thread.native_handle();
-        }
-
+        /**
+         *
+         * @return the wall time of the thread since instantiation
+         */
         std::chrono::duration<double> get_wall_time() const {
             return std::chrono::system_clock::now() - _wall_time_start;
         }
 
+        /**
+         *
+         * @return the cpu time of the thread
+         */
         std::chrono::duration<double> get_cpu_time() const
         {
             timespec now = {0};
@@ -165,16 +150,36 @@ class thread_ex
                 ts = _last_cpu_time;
 
             return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::seconds { ts.tv_sec } +
-                                                                         std::chrono::nanoseconds { ts.tv_nsec });
+                                                                          std::chrono::nanoseconds { ts.tv_nsec });
+        }
+
+        std::thread::native_handle_type native_handle() {
+            return _thread.native_handle();
+        }
+
+        void detach() const {
+            _thread.detach();
+        }
+
+        void join() const {
+            _thread.join();
+        }
+
+        bool joinable() const {
+            return _thread.joinable();
+        }
+
+        std::thread::id get_id() const {
+            return _thread.get_id();
         }
 };
 
 const thread_ex::no_callback_t thread_ex::no_callback = nullptr;
 
-class thread_pool_monitor;
+class thread_pool_monitor; // Forward declaration
 
 /**
- * @class Thread Pool
+ * @brief fixed-size pool of threads
  *
  */
 class thread_pool
@@ -195,7 +200,7 @@ class thread_pool
         mutable std::mutex _threads_mtx;
 
         /**
-         * Callback for a `thread_ex`. This is invoked once the thread is completed
+         * Callback for `thread_ex`. This is invoked once the thread is completed
          *
          * @param thread_idx thread index in `_threads`
          */
@@ -205,15 +210,7 @@ class thread_pool
         }
 
     public:
-        thread_pool()
-            : _threads(default_pool_size)
-            , _completed(default_pool_size)
-            , _wall_time_start(std::chrono::system_clock::now())
-            , _owner_thread_handle(pthread_self())
-        {
-        }
-
-        explicit thread_pool(pool_size_t size)
+        explicit thread_pool(pool_size_t size = default_pool_size)
                 : _threads(size)
                 , _completed(size)
                 , _wall_time_start(std::chrono::system_clock::now())
@@ -225,12 +222,22 @@ class thread_pool
 
         virtual ~thread_pool() = default;
 
+        /**
+         *
+         * @tparam _Fn type of function to be executed in the newly created thread
+         * @tparam _Args parameter pack to be supplied to `_Fn`
+         * @param fn instance of `_Fn`
+         * @param args instance of `_Args`
+         * @return reference to the newly instantiated `thread_ex`
+         */
         template<typename _Fn, typename ..._Args>
         thread_ex& enqueue(_Fn&& fn, _Args&&... args)
         {
             std::lock_guard<std::mutex> lk(_threads_mtx);
 
-            // @todo: Throw exception when overflowing the pool
+            if (_next_slot_idx == capacity())
+                throw std::runtime_error("Thread pool size exceeds capacity");
+
             thread_ex tex(std::forward<decltype(fn)>(fn),
                           thread_ex::no_callback,
                           std::forward<decltype(args)>(args)...);
@@ -240,12 +247,18 @@ class thread_pool
             return _threads[_next_slot_idx++];
         }
 
+        /**
+         *
+         * @ref enqueue(_Fn, _Args)
+         */
         template<typename _Fn>
         thread_ex& enqueue(_Fn&& fn)
         {
             std::lock_guard<std::mutex> lk(_threads_mtx);
 
-            // @todo: Throw exception when overflowing the pool
+            if (_next_slot_idx == capacity())
+                throw std::runtime_error("Thread pool size exceeds capacity");
+
             thread_ex tex(std::forward<decltype(fn)>(fn), thread_ex::no_callback);
             _threads[_next_slot_idx] = std::move(tex);
             _completed[_next_slot_idx] = false;
@@ -253,10 +266,18 @@ class thread_pool
             return _threads[_next_slot_idx++];
         }
 
+        /**
+         *
+         * @return wall time elapsed since creation
+         */
         std::chrono::duration<double> get_wall_time() const {
             return std::chrono::system_clock::now() - _wall_time_start;
         }
 
+        /**
+         *
+         * @return cpu time consumed in the owner thread since creation
+         */
         std::chrono::duration<double> get_cpu_time() const
         {
             timespec now = {0};
@@ -269,29 +290,43 @@ class thread_pool
                                                                          std::chrono::nanoseconds { ts.tv_nsec });
         }
 
-        pool_size_t size() const
-        {
+        /**
+         *
+         * @return the number of instantiated threads
+         */
+        pool_size_t size() const {
             return _next_slot_idx;
         }
 
-        pool_size_t capacity() const
-        {
+        /**
+         *
+         * @return the maximum number of instantiable threads
+         */
+        pool_size_t capacity() const {
             return static_cast<pool_size_t >(_threads.size());
         }
 
-        auto const& get_threads() const {
-            return _threads;
+        /**
+         *
+         * @param i the index of the thread in the pool
+         * @return true if the i-th thread is completed
+         */
+        bool completed(pool_size_t i) const {
+            return _completed[i];
         }
 
-        auto const& get_completed() const {
-            return _completed;
+        /**
+         *
+         * @return a constant reference to the thread pool container
+         */
+        std::vector<thread_ex> const& get_threads() const {
+            return _threads;
         }
 };
 
 /**
- * @class Thread Pool Monitor
- * @todo - Fluent interface for adding probes to the chain
- *        - Probe functions should be indexed (for pnp probes to work)
+ * @brief resource usage monitor for `thread_pool`
+ *
  */
 class thread_pool_monitor
 {
@@ -307,6 +342,9 @@ class thread_pool_monitor
         std::vector<probe_fn_t> _probe_chain;
         std::mutex _probe_chain_mtx;
 
+        /**
+         * @brief periodically polls for the status of threads in `_pool`
+         */
         void watchdog()
         {
             while (!_disposed)
@@ -349,28 +387,40 @@ class thread_pool_monitor
                 , _watchdog_wakeup_timeout(watchdog_wakeup_timeout)
                 , _watchdog_thread([this]() { watchdog(); })
         {
-
         }
 
         explicit thread_pool_monitor(thread_pool const& pool,
                            std::chrono::duration<double> watchdog_wakeup_timeout = 500ms)
                 : thread_pool_monitor(pool, {}, watchdog_wakeup_timeout)
         {
-
         }
 
+        /**
+         * @brief pauses the monitor watchdog
+         */
         void pause() {
             _running = false;
         }
 
+        /**
+         * @brief resumes the monitor watchdog
+         */
         void resume() {
             _running = true;
         }
 
+        /**
+         *
+         * @return true if the monitor watchdog is running
+         */
         bool running() {
             return _running;
         }
 
+        /**
+         *
+         * @param probe a `probe_fn_t` thread pool prober
+         */
         void add_probe(probe_fn_t const& probe) {
             std::lock_guard<std::mutex> lk(_probe_chain_mtx);
 
@@ -378,39 +428,40 @@ class thread_pool_monitor
         }
 };
 
-void montecarlo_pi() {
-    int interval, i;
+/**
+ *
+ * @param interval radius interval
+ * @return the montecarlo approximation of pi
+ */
+double montecarlo_pi(int interval)
+{
     double rand_x, rand_y, origin_dist, pi;
     int circle_points = 0, square_points = 0;
-    constexpr int INTERVAL = 10000;
 
-    // Initializing rand()
-    srand(time(NULL));
+    srand(time(0));
 
-    // Total Random numbers generated = possible x
-    // values * possible y values
-    for (i = 0; i < (INTERVAL * INTERVAL); i++) {
+    for (int i = 0; i < interval * interval; i++)
+    {
+        rand_x = double(rand() % (interval + 1)) / interval;
+        rand_y = double(rand() % (interval + 1)) / interval;
 
-        // Randomly generated x and y values
-        rand_x = double(rand() % (INTERVAL + 1)) / INTERVAL;
-        rand_y = double(rand() % (INTERVAL + 1)) / INTERVAL;
-
-        // Distance between (x, y) from the origin
         origin_dist = rand_x * rand_x + rand_y * rand_y;
 
-        // Checking if (x, y) lies inside the define
-        // circle with R=1
         if (origin_dist <= 1)
             circle_points++;
 
-        // Total number of points generated
         square_points++;
 
-        // estimated pi after this iteration
         pi = double(4 * circle_points) / square_points;
     }
+
+    return pi;
 }
 
+/**
+ *
+ * @param tp thread pool to be probed
+ */
 void time_probe_fn(thread_pool const& tp)
 {
     auto const& threads = tp.get_threads();
@@ -426,41 +477,37 @@ void time_probe_fn(thread_pool const& tp)
     std::cout << "[+] Thread Pool Wall Time (s): " << wall_time.count() << std::endl;
 
     for (auto id = 0; id < n_threads; id++) {
-        std::cout << "[+]\tThread " << id << " - CPU Time (s): " << threads[id].get_cpu_time().count() << std::endl;
+        std::cout << "[+] Thread " << id << " - CPU Time (s): " << threads[id].get_cpu_time().count() << std::endl;
     }
 }
 
 int main(int argc, char** argv)
 {
     thread_pool tp;
+    std::atomic<bool> leave_barrier { false };
+
+    // Start the montecarlo workers
+    for (int i = 1; i <= 4; i++) {
+        tp.enqueue([&leave_barrier](int i) {
+            while (!leave_barrier) {
+                montecarlo_pi(i);
+                std::this_thread::sleep_for(1ms);
+            }
+        }, pow(5, i));
+    }
+
+    // Start the monitor
     thread_pool_monitor tpm(tp, { time_probe_fn });
 
-    thread_ex& t1 = tp.enqueue([]() {
-        for (volatile int i = 0; i < 10e8; i++)
-            ;
-    });
-    thread_ex& t2 = tp.enqueue([]() {
-        while (true) {
-            montecarlo_pi();
-        }
-    });
-    thread_ex& t3 = tp.enqueue([]() {
-        while (true) {
-            montecarlo_pi();
-        }
-    });
-    thread_ex& t4 = tp.enqueue([]() {
-        while (true) {
-            montecarlo_pi();
-        }
-    });
-    thread_ex& t5 = tp.enqueue([]() {
-        while (true) {
-            montecarlo_pi();
-        }
-    });
+    // Wait for input
+    getchar();
 
-    while(true);
+    // Raise barrier and join
+    leave_barrier = true;
+    auto const& threads = tp.get_threads();
+
+    for (auto i = 0; i < tp.size(); i++)
+        threads[i].join();
 
     return 0;
 }
