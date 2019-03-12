@@ -16,8 +16,7 @@ The source code contains the following core components:
    called *probes* (`probe_fn_t`).
    
 The program runs 4 worker threads, each one of which computes a montecarlo method approximation
-of pi with different intervals. Empirically, the bigger the interval, the more cpu time the worker
-thread consumes.
+of pi with different intervals.
 
 # Build
 ```bash

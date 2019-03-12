@@ -13,6 +13,7 @@
 #include <iostream>
 #include <unordered_map>
 #include <cmath>
+#include <random>
 
 using namespace std::literals::chrono_literals;
 
@@ -438,12 +439,13 @@ double montecarlo_pi(int interval)
     double rand_x, rand_y, origin_dist, pi;
     int circle_points = 0, square_points = 0;
 
-    srand(time(0));
+    auto now = std::chrono::high_resolution_clock::now().time_since_epoch();
+    std::mt19937 mersenne { static_cast<unsigned long>(now.count()) };
 
     for (int i = 0; i < interval * interval; i++)
     {
-        rand_x = double(rand() % (interval + 1)) / interval;
-        rand_y = double(rand() % (interval + 1)) / interval;
+        rand_x = double(mersenne() % (interval + 1)) / interval;
+        rand_y = double(mersenne() % (interval + 1)) / interval;
 
         origin_dist = rand_x * rand_x + rand_y * rand_y;
 
@@ -491,7 +493,6 @@ int main(int argc, char** argv)
         tp.enqueue([&leave_barrier](int i) {
             while (!leave_barrier) {
                 montecarlo_pi(i);
-                std::this_thread::sleep_for(1ms);
             }
         }, pow(5, i));
     }
