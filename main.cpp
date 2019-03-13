@@ -75,24 +75,24 @@ class thread_ex
         template<typename _Fn, typename _CbFn, typename ..._Args>
         auto make_thread_thunk(_Fn&& fn, _CbFn&& cb_fn, _Args&&... args)
         {
-            return [&]()
+            return [this, fn, cb_fn, args...]()
             {
                 fn(args...);
 
                 // Callback
-                invoke_callback(std::forward<decltype(cb_fn)>(cb_fn));
+                invoke_callback(cb_fn);
             };
         }
 
         template<typename _Fn, typename _CbFn>
         auto make_thread_thunk(_Fn&& fn, _CbFn&& cb_fn)
         {
-            return [&]()
+            return [this, fn, cb_fn]()
             {
                 fn();
 
                 // Callback
-                invoke_callback(std::forward<decltype(cb_fn)>(cb_fn));
+                invoke_callback(cb_fn);
             };
         }
 
@@ -187,9 +187,10 @@ class thread_pool
 {
     friend class thread_pool_monitor;
 
-    protected:
+    public:
         using pool_size_t = unsigned int;
 
+    protected:
         static constexpr unsigned int default_pool_size = 32;
 
         std::vector<thread_ex> _threads;
@@ -240,8 +241,9 @@ class thread_pool
                 throw std::runtime_error("Thread pool size exceeds capacity");
 
             thread_ex tex(std::forward<decltype(fn)>(fn),
-                          thread_ex::no_callback,
+                          [this, idx = _next_slot_idx]() { on_thread_completed(idx); },
                           std::forward<decltype(args)>(args)...);
+
             _threads[_next_slot_idx] = std::move(tex);
             _completed[_next_slot_idx] = false;
 
@@ -260,7 +262,9 @@ class thread_pool
             if (_next_slot_idx == capacity())
                 throw std::runtime_error("Thread pool size exceeds capacity");
 
-            thread_ex tex(std::forward<decltype(fn)>(fn), thread_ex::no_callback);
+            thread_ex tex(std::forward<decltype(fn)>(fn),[this, idx = _next_slot_idx] {
+                on_thread_completed(idx);
+            });
             _threads[_next_slot_idx] = std::move(tex);
             _completed[_next_slot_idx] = false;
 
@@ -478,8 +482,11 @@ void time_probe_fn(thread_pool const& tp)
     std::cout << "[+] Thread Pool CPU Time (s): " << cpu_time.count() << std::endl;
     std::cout << "[+] Thread Pool Wall Time (s): " << wall_time.count() << std::endl;
 
-    for (auto id = 0; id < n_threads; id++) {
-        std::cout << "[+] Thread " << id << " - CPU Time (s): " << threads[id].get_cpu_time().count() << std::endl;
+    for (thread_pool::pool_size_t id = 0; id < n_threads; id++) {
+        bool completed = tp.completed(id);
+        auto thread_cpu_time = threads[id].get_cpu_time().count();
+        std::cout << "[+] Thread " << id << " - CPU Time (s): " << thread_cpu_time
+                  << (completed ? " - COMPLETED" : "") <<  std::endl;
     }
 }
 
